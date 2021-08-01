@@ -1,0 +1,8 @@
+.DS_Store
+*.dSYM
+*.o
+zmalloc/zmalloc-test
+sds/sds-test
+ae/examples/example-timer
+ae/examples/example-client
+ae/examples/example-server
