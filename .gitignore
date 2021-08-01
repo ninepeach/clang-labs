@@ -6,3 +6,8 @@ sds/sds-test
 ae/examples/example-timer
 ae/examples/example-client
 ae/examples/example-server
+crc/crc16-test
+crc/crc64-test
+base64/base64-test
+zmalloc/testhelp.h
+aes/aes-test

@@ -1099,8 +1099,8 @@ void sds_free(void *ptr) { s_free(ptr); }
 
 #if defined(SDS_TEST_MAIN)
 #include <stdio.h>
+#include <limits.h>
 #include "testhelp.h"
-#include "limits.h"
 
 #define UNUSED(x) (void)(x)
 int sdsTest(void) {
