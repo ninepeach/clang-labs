@@ -598,4 +598,4 @@ int main(void) {
 }
 #endif
 
-#endif // #if defined(CTR) && (CTR == 1)
+#endif

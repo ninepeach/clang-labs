@@ -11,3 +11,4 @@ crc/crc64-test
 base64/base64-test
 zmalloc/testhelp.h
 aes/aes-test
+randpw/randpw-test
