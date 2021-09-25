@@ -35,16 +35,6 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 // The number of columns comprising a state in AES. This is a constant in AES. Value=4
 #define Nb 4
 
-#if defined(AES256) && (AES256 == 1)
-    #define Nk 8
-    #define Nr 14
-#elif defined(AES192) && (AES192 == 1)
-    #define Nk 6
-    #define Nr 12
-#else
-    #define Nk 4        // The number of 32 bit words in a key.
-    #define Nr 10       // The number of rounds in AES Cipher.
-#endif
 
 // jcallan@github points out that declaring Multiply as a function 
 // reduces code size considerably with the Keil ARM compiler.
@@ -134,8 +124,12 @@ static uint8_t getSBoxValue(uint8_t num)
 #define getSBoxValue(num) (sbox[(num)])
 
 // This function produces Nb(Nr+1) round keys. The round keys are used in each round to decrypt the states. 
-static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
+static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key, uint8_t Nk, uint8_t Nr)
 {
+  /* Nk: Key Length */
+  /* Nb: Block Size */
+  /* Nr: Number of Rounds */
+
   unsigned i, j, k;
   uint8_t tempa[4]; // Used for the column/row operations
   
@@ -187,18 +181,22 @@ static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
 
       tempa[0] = tempa[0] ^ Rcon[i/Nk];
     }
-#if defined(AES256) && (AES256 == 1)
-    if (i % Nk == 4)
+
+    //aes256
+    if (Nk==8)
     {
-      // Function Subword()
+      if (i % Nk == 4)
       {
-        tempa[0] = getSBoxValue(tempa[0]);
-        tempa[1] = getSBoxValue(tempa[1]);
-        tempa[2] = getSBoxValue(tempa[2]);
-        tempa[3] = getSBoxValue(tempa[3]);
-      }
+        // Function Subword()
+        {
+          tempa[0] = getSBoxValue(tempa[0]);
+          tempa[1] = getSBoxValue(tempa[1]);
+          tempa[2] = getSBoxValue(tempa[2]);
+          tempa[3] = getSBoxValue(tempa[3]);
+        }
+      } 
     }
-#endif
+
     j = i * 4; k=(i - Nk) * 4;
     RoundKey[j + 0] = RoundKey[k + 0] ^ tempa[0];
     RoundKey[j + 1] = RoundKey[k + 1] ^ tempa[1];
@@ -207,17 +205,61 @@ static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
   }
 }
 
-void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key)
+static void KeyExpansion256(uint8_t* RoundKey, const uint8_t* Key)
 {
-  KeyExpansion(ctx->RoundKey, key);
+  KeyExpansion(RoundKey, Key, 8, 14);
 }
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
-void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv)
+
+static void KeyExpansion192(uint8_t* RoundKey, const uint8_t* Key)
 {
-  KeyExpansion(ctx->RoundKey, key);
+  KeyExpansion(RoundKey, Key, 6, 12);
+}
+
+static void KeyExpansion128(uint8_t* RoundKey, const uint8_t* Key)
+{
+  KeyExpansion(RoundKey, Key, 4, 10);
+}
+
+void AESInit256(struct AES_256_ctx* ctx, const uint8_t* key)
+{
+  KeyExpansion256(ctx->RoundKey, key);
+}
+
+void AESInit192(struct AES_192_ctx* ctx, const uint8_t* key)
+{
+  KeyExpansion192(ctx->RoundKey, key);
+}
+
+void AESInit128(struct AES_128_ctx* ctx, const uint8_t* key)
+{
+  KeyExpansion128(ctx->RoundKey, key);
+}
+
+#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
+void AESInitIv256(struct AES_256_ctx* ctx, const uint8_t* key, const uint8_t* iv)
+{
+  KeyExpansion256(ctx->RoundKey, key);
   memcpy (ctx->Iv, iv, AES_BLOCKLEN);
 }
-void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
+void AESInitIv192(struct AES_192_ctx* ctx, const uint8_t* key, const uint8_t* iv)
+{
+  KeyExpansion192(ctx->RoundKey, key);
+  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+}
+void AESInitIv128(struct AES_128_ctx* ctx, const uint8_t* key, const uint8_t* iv)
+{
+  KeyExpansion128(ctx->RoundKey, key);
+  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+}
+void AESSetIv256(struct AES_256_ctx* ctx, const uint8_t* iv)
+{
+  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+}
+void AESSetIv192(struct AES_192_ctx* ctx, const uint8_t* iv)
+{
+  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+}
+void AESSetIv128(struct AES_128_ctx* ctx, const uint8_t* iv)
 {
   memcpy (ctx->Iv, iv, AES_BLOCKLEN);
 }
@@ -401,7 +443,7 @@ static void InvShiftRows(state_t* state)
 #endif // #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
 
 // Cipher is the main function that encrypts the PlainText.
-static void Cipher(state_t* state, const uint8_t* RoundKey)
+static void Cipher(state_t* state, const uint8_t* RoundKey, uint8_t Nr)
 {
   uint8_t round = 0;
 
@@ -426,8 +468,23 @@ static void Cipher(state_t* state, const uint8_t* RoundKey)
   AddRoundKey(Nr, state, RoundKey);
 }
 
+static void Cipher256(state_t* state, const uint8_t* RoundKey)
+{
+  Cipher(state, RoundKey, 14);
+}
+
+static void Cipher192(state_t* state, const uint8_t* RoundKey)
+{
+  Cipher(state, RoundKey, 12);
+}
+
+static void Cipher128(state_t* state, const uint8_t* RoundKey)
+{
+  Cipher(state, RoundKey, 10);
+}
+
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
-static void InvCipher(state_t* state, const uint8_t* RoundKey)
+static void InvCipher(state_t* state, const uint8_t* RoundKey, uint8_t Nr)
 {
   uint8_t round = 0;
 
@@ -450,6 +507,22 @@ static void InvCipher(state_t* state, const uint8_t* RoundKey)
   }
 
 }
+
+static void InvCipher256(state_t* state, const uint8_t* RoundKey)
+{
+  InvCipher(state, RoundKey, 14);
+}
+
+static void InvCipher192(state_t* state, const uint8_t* RoundKey)
+{
+  InvCipher(state, RoundKey, 12);
+}
+
+static void InvCipher128(state_t* state, const uint8_t* RoundKey)
+{
+  InvCipher(state, RoundKey, 10);
+}
+
 #endif // #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
 
 /*****************************************************************************/
@@ -458,23 +531,43 @@ static void InvCipher(state_t* state, const uint8_t* RoundKey)
 #if defined(ECB) && (ECB == 1)
 
 
-void AES_ECB_encrypt(const struct AES_ctx* ctx, uint8_t* buf)
+void AES_256_ECB_encrypt(const struct AES_256_ctx* ctx, uint8_t* buf)
 {
   // The next function call encrypts the PlainText with the Key using AES algorithm.
-  Cipher((state_t*)buf, ctx->RoundKey);
+  Cipher256((state_t*)buf, ctx->RoundKey);
 }
 
-void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf)
+void AES_256_ECB_decrypt(const struct AES_256_ctx* ctx, uint8_t* buf)
 {
   // The next function call decrypts the PlainText with the Key using AES algorithm.
-  InvCipher((state_t*)buf, ctx->RoundKey);
+  InvCipher256((state_t*)buf, ctx->RoundKey);
 }
 
+void AES_192_ECB_encrypt(const struct AES_192_ctx* ctx, uint8_t* buf)
+{
+  // The next function call encrypts the PlainText with the Key using AES algorithm.
+  Cipher192((state_t*)buf, ctx->RoundKey);
+}
+
+void AES_192_ECB_decrypt(const struct AES_192_ctx* ctx, uint8_t* buf)
+{
+  // The next function call decrypts the PlainText with the Key using AES algorithm.
+  InvCipher192((state_t*)buf, ctx->RoundKey);
+}
+
+void AES_128_ECB_encrypt(const struct AES_128_ctx* ctx, uint8_t* buf)
+{
+  // The next function call encrypts the PlainText with the Key using AES algorithm.
+  Cipher128((state_t*)buf, ctx->RoundKey);
+}
+
+void AES_128_ECB_decrypt(const struct AES_128_ctx* ctx, uint8_t* buf)
+{
+  // The next function call decrypts the PlainText with the Key using AES algorithm.
+  InvCipher128((state_t*)buf, ctx->RoundKey);
+}
 
 #endif // #if defined(ECB) && (ECB == 1)
-
-
-
 
 
 #if defined(CBC) && (CBC == 1)
@@ -489,14 +582,14 @@ static void XorWithIv(uint8_t* buf, const uint8_t* Iv)
   }
 }
 
-void AES_CBC_encrypt_buffer(struct AES_ctx *ctx, uint8_t* buf, size_t length)
+void AES_256_CBC_encrypt(struct AES_256_ctx *ctx, uint8_t* buf, size_t length)
 {
   size_t i;
   uint8_t *Iv = ctx->Iv;
   for (i = 0; i < length; i += AES_BLOCKLEN)
   {
     XorWithIv(buf, Iv);
-    Cipher((state_t*)buf, ctx->RoundKey);
+    Cipher256((state_t*)buf, ctx->RoundKey);
     Iv = buf;
     buf += AES_BLOCKLEN;
   }
@@ -504,21 +597,77 @@ void AES_CBC_encrypt_buffer(struct AES_ctx *ctx, uint8_t* buf, size_t length)
   memcpy(ctx->Iv, Iv, AES_BLOCKLEN);
 }
 
-void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+void AES_192_CBC_encrypt(struct AES_192_ctx *ctx, uint8_t* buf, size_t length)
+{
+  size_t i;
+  uint8_t *Iv = ctx->Iv;
+  for (i = 0; i < length; i += AES_BLOCKLEN)
+  {
+    XorWithIv(buf, Iv);
+    Cipher192((state_t*)buf, ctx->RoundKey);
+    Iv = buf;
+    buf += AES_BLOCKLEN;
+  }
+  /* store Iv in ctx for next call */
+  memcpy(ctx->Iv, Iv, AES_BLOCKLEN);
+}
+
+void AES_128_CBC_encrypt(struct AES_128_ctx *ctx, uint8_t* buf, size_t length)
+{
+  size_t i;
+  uint8_t *Iv = ctx->Iv;
+  for (i = 0; i < length; i += AES_BLOCKLEN)
+  {
+    XorWithIv(buf, Iv);
+    Cipher128((state_t*)buf, ctx->RoundKey);
+    Iv = buf;
+    buf += AES_BLOCKLEN;
+  }
+  /* store Iv in ctx for next call */
+  memcpy(ctx->Iv, Iv, AES_BLOCKLEN);
+}
+
+void AES_256_CBC_decrypt(struct AES_256_ctx* ctx, uint8_t* buf, size_t length)
 {
   size_t i;
   uint8_t storeNextIv[AES_BLOCKLEN];
   for (i = 0; i < length; i += AES_BLOCKLEN)
   {
     memcpy(storeNextIv, buf, AES_BLOCKLEN);
-    InvCipher((state_t*)buf, ctx->RoundKey);
+    InvCipher256((state_t*)buf, ctx->RoundKey);
     XorWithIv(buf, ctx->Iv);
     memcpy(ctx->Iv, storeNextIv, AES_BLOCKLEN);
     buf += AES_BLOCKLEN;
   }
-
 }
 
+void AES_192_CBC_decrypt(struct AES_192_ctx* ctx, uint8_t* buf, size_t length)
+{
+  size_t i;
+  uint8_t storeNextIv[AES_BLOCKLEN];
+  for (i = 0; i < length; i += AES_BLOCKLEN)
+  {
+    memcpy(storeNextIv, buf, AES_BLOCKLEN);
+    InvCipher192((state_t*)buf, ctx->RoundKey);
+    XorWithIv(buf, ctx->Iv);
+    memcpy(ctx->Iv, storeNextIv, AES_BLOCKLEN);
+    buf += AES_BLOCKLEN;
+  }
+}
+
+void AES_128_CBC_decrypt(struct AES_128_ctx* ctx, uint8_t* buf, size_t length)
+{
+  size_t i;
+  uint8_t storeNextIv[AES_BLOCKLEN];
+  for (i = 0; i < length; i += AES_BLOCKLEN)
+  {
+    memcpy(storeNextIv, buf, AES_BLOCKLEN);
+    InvCipher128((state_t*)buf, ctx->RoundKey);
+    XorWithIv(buf, ctx->Iv);
+    memcpy(ctx->Iv, storeNextIv, AES_BLOCKLEN);
+    buf += AES_BLOCKLEN;
+  }
+}
 #endif // #if defined(CBC) && (CBC == 1)
 
 
@@ -526,181 +675,102 @@ void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 #if defined(CTR) && (CTR == 1)
 
 /* Symmetrical operation: same function for encrypting as for decrypting. Note any IV/nonce should never be reused with the same key */
-void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+void AES_256_CTR_xcrypt(struct AES_256_ctx* ctx, uint8_t* buf, size_t length)
 {
-  uint8_t buffer[AES_BLOCKLEN];
-  
-  size_t i;
-  int bi;
-  for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
-  {
-    if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+    uint8_t buffer[AES_BLOCKLEN];
+    
+    size_t i;
+    int bi;
+    for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
     {
-      
-      memcpy(buffer, ctx->Iv, AES_BLOCKLEN);
-      Cipher((state_t*)buffer,ctx->RoundKey);
+        if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+        {
+          
+            memcpy(buffer, ctx->Iv, AES_BLOCKLEN);
+            Cipher256((state_t*)buffer,ctx->RoundKey);
 
-      /* Increment Iv and handle overflow */
-      for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
-      {
-	/* inc will overflow */
-        if (ctx->Iv[bi] == 255)
-	{
-          ctx->Iv[bi] = 0;
-          continue;
-        } 
-        ctx->Iv[bi] += 1;
-        break;   
-      }
-      bi = 0;
+            /* Increment Iv and handle overflow */
+            for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
+            {
+                /* inc will overflow */
+                if (ctx->Iv[bi] == 255)
+                {
+                    ctx->Iv[bi] = 0;
+                    continue;
+                } 
+                ctx->Iv[bi] += 1;
+                break;   
+            }
+            bi = 0;
+        }
+
+        buf[i] = (buf[i] ^ buffer[bi]);
     }
-
-    buf[i] = (buf[i] ^ buffer[bi]);
-  }
 }
 
-/* Test main */
-#ifdef AES_TEST_MAIN
-
-#include <stdio.h>
-
-static int test_ecb(void)
+void AES_192_CTR_xcrypt(struct AES_192_ctx* ctx, uint8_t* buf, size_t length)
 {
-    int retcode = 0;
-    //aes128
-    uint8_t key[] = { 0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c };
-    uint8_t out[] = { 0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60, 0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97 };
-    uint8_t in[]  = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a };
-    uint8_t decoded[] = { 0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60, 0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97 };
-    uint8_t encoded[]  = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a };
+    uint8_t buffer[AES_BLOCKLEN];
+    
+    size_t i;
+    int bi;
+    for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
+    {
+        if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+        {
+          
+            memcpy(buffer, ctx->Iv, AES_BLOCKLEN);
+            Cipher192((state_t*)buffer,ctx->RoundKey);
 
-    struct AES_ctx ctx;
+            /* Increment Iv and handle overflow */
+            for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
+            {
+                /* inc will overflow */
+                if (ctx->Iv[bi] == 255)
+                {
+                    ctx->Iv[bi] = 0;
+                    continue;
+                } 
+                ctx->Iv[bi] += 1;
+                break;   
+            }
+            bi = 0;
+        }
 
-    AES_init_ctx(&ctx, key);
-
-    AES_ECB_encrypt(&ctx, in);
-    if (0 == memcmp((char*) decoded, (char*) in, 16)) {
-        printf("AES128 ECB ENCODE SUCCESS!\n");
-    } else {
-        printf("AES128 ECB ENCODE FAILURE!\n");
-        retcode = 1;
+        buf[i] = (buf[i] ^ buffer[bi]);
     }
-
-    AES_ECB_decrypt(&ctx, in);
-    if (0 == memcmp((char*) encoded, (char*) in, 16)) {
-        printf("AES128 ECB DECODE SUCCESS!\n");
-    } else {
-        printf("AES128 ECB DECODE FAILURE!\n");
-        retcode = 1;
-    }
-
-    return retcode;
 }
 
-static int test_cbc(void)
+void AES_128_CTR_xcrypt(struct AES_128_ctx* ctx, uint8_t* buf, size_t length)
 {
-    int retcode = 0;
-
-    uint8_t key[] = { 0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c };
-    uint8_t out[] = { 0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19, 0x7d,
-                      0x50, 0x86, 0xcb, 0x9b, 0x50, 0x72, 0x19, 0xee, 0x95, 0xdb, 0x11, 0x3a, 0x91, 0x76, 0x78, 0xb2,
-                      0x73, 0xbe, 0xd6, 0xb8, 0xe3, 0xc1, 0x74, 0x3b, 0x71, 0x16, 0xe6, 0x9e, 0x22, 0x22, 0x95, 0x16,
-                      0x3f, 0xf1, 0xca, 0xa1, 0x68, 0x1f, 0xac, 0x09, 0x12, 0x0e, 0xca, 0x30, 0x75, 0x86, 0xe1, 0xa7 };
-    uint8_t iv[]  = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
-    uint8_t in[]  = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
-                      0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
-                      0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
-                      0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10 };
-
-    uint8_t encoded[]  = { 0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19, 0x7d,
-                      0x50, 0x86, 0xcb, 0x9b, 0x50, 0x72, 0x19, 0xee, 0x95, 0xdb, 0x11, 0x3a, 0x91, 0x76, 0x78, 0xb2,
-                      0x73, 0xbe, 0xd6, 0xb8, 0xe3, 0xc1, 0x74, 0x3b, 0x71, 0x16, 0xe6, 0x9e, 0x22, 0x22, 0x95, 0x16,
-                      0x3f, 0xf1, 0xca, 0xa1, 0x68, 0x1f, 0xac, 0x09, 0x12, 0x0e, 0xca, 0x30, 0x75, 0x86, 0xe1, 0xa7 };
-
-    uint8_t decoded[] = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
-                      0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
-                      0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
-                      0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10 };
-
-
-    struct AES_ctx ctx;
-
-    AES_init_ctx_iv(&ctx, key, iv);
-    AES_CBC_encrypt_buffer(&ctx, in, 64);
-
-    if (0 == memcmp((char*) encoded, (char*) in, 16)) {
-        printf("AES128 CBC ENCODE SUCCESS!\n");
-    } else {
-        printf("AES128 CBC ENCODE FAILURE!\n");
-        retcode = 1;
-    }
-
-
-    AES_init_ctx_iv(&ctx, key, iv);
-    AES_CBC_decrypt_buffer(&ctx, in, 64);
-
-    if (0 == memcmp((char*) decoded, (char*) in, 16)) {
-        printf("AES128 CBC DECODE SUCCESS!\n");
-    } else {
-        printf("AES128 CBC DECODE FAILURE!\n");
-        retcode = 1;
-    }
-    return retcode;
-}
-
-static int test_ctr(void)
-{
-    int retcode = 0;
-    uint8_t key[16] = { 0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c };
-    uint8_t in[64]  = { 0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26, 0x1b, 0xef, 0x68, 0x64, 0x99, 0x0d, 0xb6, 0xce,
-                        0x98, 0x06, 0xf6, 0x6b, 0x79, 0x70, 0xfd, 0xff, 0x86, 0x17, 0x18, 0x7b, 0xb9, 0xff, 0xfd, 0xff,
-                        0x5a, 0xe4, 0xdf, 0x3e, 0xdb, 0xd5, 0xd3, 0x5e, 0x5b, 0x4f, 0x09, 0x02, 0x0d, 0xb0, 0x3e, 0xab,
-                        0x1e, 0x03, 0x1d, 0xda, 0x2f, 0xbe, 0x03, 0xd1, 0x79, 0x21, 0x70, 0xa0, 0xf3, 0x00, 0x9c, 0xee };
-    uint8_t iv[16]  = { 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff };
-    uint8_t out[64] = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
-                        0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
-                        0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
-                        0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10 };
-
-    uint8_t encoded[64] = { 0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
-                        0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
-                        0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11, 0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
-                        0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17, 0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10 };
-    uint8_t decoded[64]  = { 0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26, 0x1b, 0xef, 0x68, 0x64, 0x99, 0x0d, 0xb6, 0xce,
-                        0x98, 0x06, 0xf6, 0x6b, 0x79, 0x70, 0xfd, 0xff, 0x86, 0x17, 0x18, 0x7b, 0xb9, 0xff, 0xfd, 0xff,
-                        0x5a, 0xe4, 0xdf, 0x3e, 0xdb, 0xd5, 0xd3, 0x5e, 0x5b, 0x4f, 0x09, 0x02, 0x0d, 0xb0, 0x3e, 0xab,
-                        0x1e, 0x03, 0x1d, 0xda, 0x2f, 0xbe, 0x03, 0xd1, 0x79, 0x21, 0x70, 0xa0, 0xf3, 0x00, 0x9c, 0xee };
-
-    struct AES_ctx ctx;
+    uint8_t buffer[AES_BLOCKLEN];
     
-    AES_init_ctx_iv(&ctx, key, iv);
-    AES_CTR_xcrypt_buffer(&ctx, in, 64);
-    
-    if (0 == memcmp((char *) encoded, (char *) in, 64)) {
-        printf("AES128 CTR ENCODE SUCCESS!\n");
-    } else {
-        printf("AES128 CTR ENCODE FAILURE!\n");
-        retcode = 1;
-    } 
+    size_t i;
+    int bi;
+    for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
+    {
+        if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+        {
+          
+            memcpy(buffer, ctx->Iv, AES_BLOCKLEN);
+            Cipher128((state_t*)buffer,ctx->RoundKey);
 
-    AES_init_ctx_iv(&ctx, key, iv);
-    AES_CTR_xcrypt_buffer(&ctx, in, 64);
-    
-    if (0 == memcmp((char *) decoded, (char *) in, 64)) {
-        printf("AES128 CTR DECODE SUCCESS!\n");
-    } else {
-        printf("AES128 CTR DECODE FAILURE!\n");
-        retcode = 1;
+            /* Increment Iv and handle overflow */
+            for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
+            {
+                /* inc will overflow */
+                if (ctx->Iv[bi] == 255)
+                {
+                    ctx->Iv[bi] = 0;
+                    continue;
+                } 
+                ctx->Iv[bi] += 1;
+                break;   
+            }
+            bi = 0;
+        }
+
+        buf[i] = (buf[i] ^ buffer[bi]);
     }
-    return retcode;
 }
-
-int main(void) {
-    int exit;
-    exit = test_cbc() + test_ctr() + test_ecb();
-
-    return exit;
-}
-#endif
-
 #endif
