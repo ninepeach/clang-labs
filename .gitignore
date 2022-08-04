@@ -12,3 +12,4 @@ base64/base64-test
 zmalloc/testhelp.h
 aes/aes-test
 randpw/randpw-test
+cidr/cidr-test
