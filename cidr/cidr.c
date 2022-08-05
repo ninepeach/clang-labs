@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <ctype.h>
+#include <inttypes.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
 

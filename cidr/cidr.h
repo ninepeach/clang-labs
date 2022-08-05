@@ -3,6 +3,8 @@
 
 #include <stdio.h>
 #include <ctype.h>
+#include <inttypes.h>
+#include <sys/types.h>
 #include <stdlib.h>
 
 uint32_t cidrInt2Ip(uint32_t ip, char *buf);
